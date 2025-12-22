@@ -1,19 +1,19 @@
 # File: app.py
+from fastapi import FastAPI, HTTPException
 from models import ProjectRequest, GrasslandSpecs, WetlandSpecs, ForestSpecs
-from database import init_db, save_project 
+from database import init_db, save_project, get_marketplace_listings
 
-# --- MATH LOGIC ---
+# 1. Initialize the App
+app = FastAPI(title="GloCarbon Engine API", version="1.0.0")
+
+# --- MATH LOGIC (Internal Helpers) ---
 
 def _calculate_grassland_credits(raw_specs):
-    # 1. Validate
     specs = GrasslandSpecs(**raw_specs) 
-    
-    # 2. Calculate
     methane_penalty = specs.livestock_density * 0.5
     base_rate = 3.5
     gross = specs.area_hectares * base_rate * specs.health_index
     net = max(0, gross - (specs.area_hectares * methane_penalty))
-    
     return round(net, 2)
 
 def _calculate_wetland_credits(raw_specs):
@@ -26,52 +26,68 @@ def _calculate_forest_credits(raw_specs):
     biomass_per_tree = 0.02
     return round(specs.area_hectares * specs.tree_density * biomass_per_tree, 2)
 
-# --- MAIN ROUTER ---
+# --- API ENDPOINTS (The Public Doors) ---
 
-def process_project_valuation(json_data):
+@app.on_event("startup")
+def startup_event():
+    """Run this when the server turns on"""
+    init_db()
+    print("🚀 GloCarbon API is listening...")
+
+@app.get("/")
+def home():
+    """Simple check to see if we are online"""
+    return {"status": "online", "message": "GloCarbon AI Engine is Ready 🌍"}
+
+@app.get("/market")
+def view_market():
+    """Fetch all listed projects"""
+    listings = get_marketplace_listings()
+    # Format the data for the web
+    results = []
+    for item in listings:
+        results.append({
+            "id": item[0],
+            "project_name": item[1],
+            "type": item[2],
+            "credits": item[3],
+            "status": item[4]
+        })
+    return {"count": len(results), "projects": results}
+
+@app.post("/verify_project")
+def submit_project(project: ProjectRequest):
     """
-    Receives raw JSON, validates it against blueprints, calculates credits,
-    and saves the result to the database.
+    Accepts JSON data, validates it, calculates credits, and saves it.
     """
-    print("\n🛡️  SECURITY: Validating input data...")
+    print(f"📥 Received project: {project.project_name}")
     
+    total_credits = 0
+    details = []
+
     try:
-        # STEP 1: Check the overall structure
-        project = ProjectRequest(**json_data)
-        print(f"✅ Data looks good! Analyzing '{project.project_name}'...")
-        
-        total_credits = 0
-        
-        # STEP 2: Analyze each zone
+        # Analyze each zone using the Pydantic models automatically!
         for zone in project.ecosystems:
             credits = 0
-            
             if zone.type == 'grassland':
                 credits = _calculate_grassland_credits(zone.specs)
             elif zone.type == 'wetland':
                 credits = _calculate_wetland_credits(zone.specs)
             elif zone.type == 'forest':
                 credits = _calculate_forest_credits(zone.specs)
-                
-            print(f"   > Found {zone.type}: +{credits} VCUs")
-            total_credits += credits
             
-        print(f"💎 TOTAL VERIFIED CREDITS: {total_credits}")
+            total_credits += credits
+            details.append({"type": zone.type, "generated_credits": credits})
 
-        # STEP 3: Save to Database
+        # Save to DB
         save_project(project, total_credits)
-        
-        return total_credits
+
+        return {
+            "status": "Verified",
+            "project_name": project.project_name,
+            "total_credits": total_credits,
+            "breakdown": details
+        }
 
     except Exception as e:
-        print(f"\n❌ DATA REJECTED: {e}")
-        return None
-
-# Entry point
-def main():
-    # Initialize the DB when the app starts
-    init_db()
-    print("GloCarbon Multi-Ecosystem Engine is Online! 🌍🔄")
-
-if __name__ == "__main__":
-    main()
+        raise HTTPException(status_code=400, detail=str(e))
