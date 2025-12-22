@@ -1,42 +1,40 @@
-import datetime
+# File: test_engine.py
 from app import process_project_valuation
 
-def generate_complex_land_data():
+def generate_bad_data():
     return {
-        "timestamp": str(datetime.datetime.now()),
-        "project_owner": "Mara_North_Conservancy",
-        "project_name": "Mara Mixed-Use Conservation Project",
-        # The AI now accepts a LIST of ecosystems found on the property
+        "project_owner": "Lazy_User",
+        "project_name": "Bad", # Too short! (Should fail)
         "ecosystems": [
             {
                 "type": "grassland",
                 "specs": {
-                    "area_hectares": 400.0,
-                    "health_index": 0.9,
-                    "livestock_density": 1.2 # Cows per hectare (Reduces credits!)
+                    "area_hectares": 100, 
+                    # MISSING 'health_index' -> Should fail!
                 }
-            },
+            }
+        ]
+    }
+
+def generate_good_data():
+    return {
+        "project_owner": "Serious_Rancher",
+        "project_name": "Valid Savannah Project",
+        "ecosystems": [
             {
-                "type": "wetland",
+                "type": "grassland",
                 "specs": {
-                    "area_hectares": 50.0, # Small swamp area
-                    "water_level": "stable"
-                }
-            },
-            {
-                "type": "forest",
-                "specs": {
-                    "area_hectares": 50.0, # Patches of Acacia
-                    "tree_density": 150 # Trees per hectare
+                    "area_hectares": 100,
+                    "health_index": 0.8,
+                    "livestock_density": 0.5
                 }
             }
         ]
     }
 
 if __name__ == "__main__":
-    print("--- 🧪 Starting GloCarbon Holistic Audit ---")
+    print("--- 🧪 TEST 1: Sending BAD Data ---")
+    process_project_valuation(generate_bad_data())
     
-    data = generate_complex_land_data()
-    process_project_valuation(data)
-    
-    print("--- 🏁 Audit Complete ---")
+    print("\n--- 🧪 TEST 2: Sending GOOD Data ---")
+    process_project_valuation(generate_good_data())
