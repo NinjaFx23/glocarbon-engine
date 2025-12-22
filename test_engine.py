@@ -1,33 +1,42 @@
-# File: test_engine.py
-import json
 import datetime
+from app import process_project_valuation
 
-# 👇 THIS LINE CHANGED: We now import from 'app'
-from app import process_carbon_data 
-
-def generate_dummy_data():
-    data = {
+def generate_complex_land_data():
+    return {
         "timestamp": str(datetime.datetime.now()),
-        "source_id": "factory_01",
-        "metrics": {
-            "electricity_usage": 150.5, 
-            "transport_fuel": 40.0      
-        }
+        "project_owner": "Mara_North_Conservancy",
+        "project_name": "Mara Mixed-Use Conservation Project",
+        # The AI now accepts a LIST of ecosystems found on the property
+        "ecosystems": [
+            {
+                "type": "grassland",
+                "specs": {
+                    "area_hectares": 400.0,
+                    "health_index": 0.9,
+                    "livestock_density": 1.2 # Cows per hectare (Reduces credits!)
+                }
+            },
+            {
+                "type": "wetland",
+                "specs": {
+                    "area_hectares": 50.0, # Small swamp area
+                    "water_level": "stable"
+                }
+            },
+            {
+                "type": "forest",
+                "specs": {
+                    "area_hectares": 50.0, # Patches of Acacia
+                    "tree_density": 150 # Trees per hectare
+                }
+            }
+        ]
     }
-    return data
 
 if __name__ == "__main__":
-    print("--- 🧪 Starting GloCarbon Interface Test ---")
+    print("--- 🧪 Starting GloCarbon Holistic Audit ---")
     
-    # 1. Generate Data
-    payload = generate_dummy_data()
-    print("📦 Payload Generated.")
-
-    # 2. Send to Engine
-    print("📡 Sending data to Engine...")
+    data = generate_complex_land_data()
+    process_project_valuation(data)
     
-    # This calls the function inside app.py
-    result = process_carbon_data(payload)
-    
-    print(f"\n✅ Calculation Received: {result} kgCO2 total.")
-    print("--- 🏁 Test Complete ---")
+    print("--- 🏁 Audit Complete ---")

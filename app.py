@@ -1,33 +1,102 @@
 # File: app.py
-import json
+# GloCarbon Multi-Ecosystem Valuation Engine (Verra Aligned)
 
-# 1. This is the logic function (The "Brain")
-def process_carbon_data(data_payload):
+def _calculate_grassland_credits(specs):
     """
-    Receives data, calculates carbon footprint, and returns a result.
+    Implements logic from Verra VM0042 (Improved Agricultural Land Management).
+    Focus: Soil Organic Carbon (SOC) sequestration.
     """
-    print(f"\n⚙️  ENGINE: Processing data from {data_payload.get('source_id')}...")
+    area = specs.get('area_hectares', 0)
+    health = specs.get('health_index', 0)
     
-    # Extract metrics from the input data
-    metrics = data_payload.get('metrics', {})
-    elec = metrics.get('electricity_usage', 0)
-    fuel = metrics.get('transport_fuel', 0)
+    # Verra Logic: Deduct for leakage (e.g., livestock methane)
+    livestock_density = specs.get('livestock_density', 0) # Units per hectare
+    methane_penalty = livestock_density * 0.5 # Simplified penalty factor
     
-    # --- BASIC CALCULATION LOGIC ---
-    # Electricity factor: 0.5 kgCO2 per kWh
-    # Fuel factor: 2.3 kgCO2 per Liter
-    carbon_footprint = (elec * 0.5) + (fuel * 2.3)
+    base_rate = 3.5 # tonnes/ha (Healthy Savannah)
+    gross_credits = area * base_rate * health
     
-    # Print the breakdown so we can see it working
-    print(f"   ⚡ Electricity Impact: {elec * 0.5} kgCO2")
-    print(f"   ⛽ Fuel Impact:       {fuel * 2.3} kgCO2")
-    print(f"   📉 TOTAL FOOTPRINT:   {carbon_footprint} kgCO2")
+    # Net Credits = Gross Sequestration - Methane Leakage
+    net_credits = max(0, gross_credits - (area * methane_penalty))
     
-    return carbon_footprint
+    return {
+        "type": "Grassland (VM0042)",
+        "credits": round(net_credits, 2),
+        "note": f"Penalty applied for {livestock_density} livestock/ha"
+    }
 
-# 2. Main Entry Point
+def _calculate_wetland_credits(specs):
+    """
+    Implements logic from Verra VM0033 (Tidal Wetland/Seagrass Restoration).
+    Focus: Blue Carbon (very high sequestration).
+    """
+    area = specs.get('area_hectares', 0)
+    
+    # Wetlands sequester significantly more carbon than forests/grass
+    base_rate = 8.0 # tonnes/ha
+    
+    total_credits = area * base_rate
+    return {
+        "type": "Wetland/Blue Carbon (VM0033)",
+        "credits": round(total_credits, 2),
+        "note": "High-value ecosystem detected"
+    }
+
+def _calculate_forest_credits(specs):
+    """
+    Implements logic from Verra VM0007 (REDD+ / Forestry).
+    Focus: Above-ground biomass.
+    """
+    area = specs.get('area_hectares', 0)
+    tree_density = specs.get('tree_density', 0) # Trees per hectare
+    
+    # Simplified biomass formula
+    biomass_per_tree = 0.02 # tonnes CO2
+    total_credits = area * tree_density * biomass_per_tree
+    
+    return {
+        "type": "Forestry/Agroforestry (VM0007)",
+        "credits": round(total_credits, 2),
+        "note": f"Density: {tree_density} trees/ha"
+    }
+
+def process_project_valuation(project_data):
+    """
+    Main Router: Breaks a project down into ecosystems and aggregates value.
+    """
+    project_name = project_data.get('project_name')
+    print(f"\n🌍 ENGINE: Starting Holistic Analysis for '{project_name}'...")
+    
+    ecosystems = project_data.get('ecosystems', [])
+    total_credits = 0
+    report = []
+    
+    for zone in ecosystems:
+        land_type = zone.get('type')
+        specs = zone.get('specs')
+        
+        # ROUTING LOGIC: AI decides which standard to apply
+        if land_type == 'grassland':
+            result = _calculate_grassland_credits(specs)
+        elif land_type == 'wetland':
+            result = _calculate_wetland_credits(specs)
+        elif land_type == 'forest':
+            result = _calculate_forest_credits(specs)
+        else:
+            result = {"type": "Unknown", "credits": 0, "note": "No methodology found"}
+            
+        # Add to totals
+        total_credits += result['credits']
+        report.append(result)
+        
+        print(f"   Detected {result['type']}: +{result['credits']} VCUs ({result['note']})")
+
+    print(f"   💎 GRAND TOTAL: {total_credits:.2f} Verified Carbon Units (VCUs)")
+    return total_credits
+
+# Entry point
 def main():
-    print("GloCarbon AI Engine is Online! 🌍🚀")
+    print("GloCarbon Multi-Ecosystem Engine is Online! 🌍🔄")
 
 if __name__ == "__main__":
     main()
