@@ -4,3 +4,5 @@ pydantic
 python-multipart
 pillow
 numpy
+scikit-learn
+joblib
