@@ -1,7 +1,23 @@
-# File: app.py
 from fastapi import FastAPI, HTTPException
-from models import ProjectRequest, GrasslandSpecs, WetlandSpecs, ForestSpecs
-from database import init_db, save_project, get_marketplace_listings
+from pydantic import BaseModel
+from typing import List
+from database import add_project, get_all_projects
+from models import ProjectSubmission
+# 1. IMPORT CORS
+from fastapi.middleware.cors import CORSMiddleware 
+
+app = FastAPI()
+
+# 2. ADD THE PERMISSION SLIP (Allow your app to talk to the server)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows ALL origins (Mobile apps, Localhost, etc.)
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (POST, GET, etc.)
+    allow_headers=["*"],
+)
+
+# ... The rest of your code (endpoints) stays the same below ...
 
 # 1. Initialize the App
 app = FastAPI(title="GloCarbon Engine API", version="1.0.0")
