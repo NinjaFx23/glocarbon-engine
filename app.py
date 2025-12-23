@@ -3,12 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 
 # --- IMPORTS FROM YOUR FILES ---
-# Ensure models.py has these classes
-from models import ProjectSubmission, GrasslandSpecs, WetlandSpecs, ForestSpecs
-# Ensure database.py has these functions
+# We use ProjectRequest because that is what your models.py uses!
+from models import ProjectRequest, GrasslandSpecs, WetlandSpecs, ForestSpecs
 from database import add_project, get_all_projects
 
-# 1. INITIALIZE THE APP (ONCE!)
+# 1. INITIALIZE THE APP
 app = FastAPI(title="GloCarbon Engine API", version="1.0.0")
 
 # 2. ADD THE PERMISSION SLIP (CORS)
@@ -17,13 +16,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allows ALL origins
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (POST, GET, etc.)
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # --- MATH LOGIC (Internal Helpers) ---
 
-def _calculate_grassland_credits(specs: GrasslandSpecs):
+def _calculate_grassland_credits(raw_specs):
+    # Convert the dictionary (raw_specs) into the Pydantic model
+    specs = GrasslandSpecs(**raw_specs) 
+    
     # Logic: Cows reduce credits (methane), Health increases them
     methane_penalty = specs.livestock_density * 0.5
     base_rate = 3.5
@@ -31,17 +33,19 @@ def _calculate_grassland_credits(specs: GrasslandSpecs):
     net = max(0, gross - (specs.area_hectares * methane_penalty))
     return round(net, 2)
 
-def _calculate_wetland_credits(specs: WetlandSpecs):
+def _calculate_wetland_credits(raw_specs):
+    specs = WetlandSpecs(**raw_specs)
     # Logic: Wetlands generate high credits (8.0 base)
     base_rate = 8.0
     return round(specs.area_hectares * base_rate, 2)
 
-def _calculate_forest_credits(specs: ForestSpecs):
+def _calculate_forest_credits(raw_specs):
+    specs = ForestSpecs(**raw_specs)
     # Logic: Tree density matters
     biomass_per_tree = 0.02
     return round(specs.area_hectares * specs.tree_density * biomass_per_tree, 2)
 
-# --- API ENDPOINTS (The Public Doors) ---
+# --- API ENDPOINTS ---
 
 @app.on_event("startup")
 def startup_event():
@@ -49,19 +53,17 @@ def startup_event():
 
 @app.get("/")
 def home():
-    """Simple check to see if we are online"""
     return {"status": "online", "message": "GloCarbon AI Engine is Ready 🌍"}
 
 @app.get("/market")
 def view_market():
-    """Fetch all listed projects"""
     listings = get_all_projects()
     return {"count": len(listings), "projects": listings}
 
 @app.post("/verify_project")
-def submit_project(submission: ProjectSubmission):
+def submit_project(submission: ProjectRequest):
     """
-    Accepts JSON data, validates it, calculates credits, and saves it.
+    Accepts ProjectRequest (from your models.py), validates it, calculates credits.
     """
     print(f"📥 Received project: {submission.project_name}")
     
@@ -75,8 +77,8 @@ def submit_project(submission: ProjectSubmission):
             
             # Select the right math formula based on type
             if zone.type == 'grassland':
-                # We validate that the specs match the Grassland requirements
-                if zone.specs.livestock_density is None: zone.specs.livestock_density = 0.0
+                # Handle optional livestock if missing
+                if 'livestock_density' not in zone.specs: zone.specs['livestock_density'] = 0.0
                 credits = _calculate_grassland_credits(zone.specs)
                 
             elif zone.type == 'wetland':
@@ -94,7 +96,7 @@ def submit_project(submission: ProjectSubmission):
         project_data["breakdown"] = details
         project_data["status"] = "Verified"
 
-        # Save to DB (Using the correct function name from database.py)
+        # Save to DB
         add_project(project_data)
 
         return {
