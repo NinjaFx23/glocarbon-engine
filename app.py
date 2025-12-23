@@ -1,15 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from PIL import Image
+import numpy as np
+import io
 
-# --- IMPORTS (Matched to your files) ---
-from models import ProjectRequest, GrasslandSpecs, WetlandSpecs, ForestSpecs
-from database import save_project, get_marketplace_listings, init_db
+# Import database functions
+from database import save_project, init_db
 
-# 1. INITIALIZE THE APP
-app = FastAPI(title="GloCarbon Engine API", version="1.0.0")
+app = FastAPI(title="GloCarbon AI Engine", version="2.0.0")
 
-# 2. PERMISSION SLIP (CORS)
+# CORS (Permission Slip)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,95 +18,84 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- MATH LOGIC ---
-
-def _calculate_grassland_credits(raw_specs):
-    specs = GrasslandSpecs(**raw_specs) 
-    methane_penalty = specs.livestock_density * 0.5
-    base_rate = 3.5
-    gross = specs.area_hectares * base_rate * specs.health_index
-    net = max(0, gross - (specs.area_hectares * methane_penalty))
-    return round(net, 2)
-
-def _calculate_wetland_credits(raw_specs):
-    specs = WetlandSpecs(**raw_specs)
-    base_rate = 8.0
-    return round(specs.area_hectares * base_rate, 2)
-
-def _calculate_forest_credits(raw_specs):
-    specs = ForestSpecs(**raw_specs)
-    biomass_per_tree = 0.02
-    return round(specs.area_hectares * specs.tree_density * biomass_per_tree, 2)
+# --- THE "REAL" AI LOGIC ---
+def analyze_vegetation_health(image_bytes):
+    """
+    1. Opens the image.
+    2. Converts to standard RGB.
+    3. Calculates how 'Green' the image is (Greenness Index).
+    This is the placeholder where we will plug in the MindSpore model later.
+    """
+    try:
+        # Open image from bytes
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        img = img.resize((224, 224)) # Resize for standard AI input
+        
+        # Convert to math array
+        data = np.array(img)
+        
+        # Simple Algorithm: Calculate Green Ratio vs Red/Blue
+        # (Green Channel - Red Channel) + (Green Channel - Blue Channel)
+        # This is a basic "Excess Green" index used in agriculture.
+        r, g, b = data[:,:,0], data[:,:,1], data[:,:,2]
+        
+        # Avoid division by zero
+        green_score = np.mean(g)
+        total_intensity = np.mean(r) + np.mean(g) + np.mean(b)
+        
+        health_index = 0.0
+        if total_intensity > 0:
+            health_index = green_score / (total_intensity / 3)
+            
+        # Normalize to 0.0 - 1.0 range (Simple heuristic)
+        # If green is dominant (>1.0), it's healthy.
+        normalized_health = min(max((health_index - 0.8) * 2, 0.1), 1.0)
+        
+        return round(normalized_health, 2)
+        
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return 0.5 # Default fallback
 
 # --- API ENDPOINTS ---
 
 @app.on_event("startup")
 def startup_event():
-    """Initialize the database when the server starts"""
     init_db()
-    print("🚀 GloCarbon API is listening...")
 
 @app.get("/")
 def home():
-    return {"status": "online", "message": "GloCarbon AI Engine is Ready 🌍"}
+    return {"status": "Active", "mode": "Computer Vision 📸"}
 
-@app.get("/market")
-def view_market():
-    # Get raw rows (tuples) from database
-    rows = get_marketplace_listings()
+@app.post("/scan_plot")
+async def scan_plot(file: UploadFile = File(...)):
+    """
+    Receives an IMAGE file, runs analysis, and returns credits.
+    """
+    print(f"📸 Receiving Image: {file.filename}")
     
-    # Convert tuples to JSON dictionary
-    results = []
-    for item in rows:
-        results.append({
-            "id": item[0],
-            "project_name": item[1],
-            "type": item[2],
-            "credits": item[3],
-            "status": item[4]
-        })
-    return {"count": len(results), "projects": results}
-
-@app.post("/verify_project")
-def submit_project(submission: ProjectRequest):
-    print(f"📥 Received project: {submission.project_name}")
+    # 1. READ THE IMAGE
+    contents = await file.read()
     
-    total_credits = 0.0
-    details = []
-
-    try:
-        # 1. Calculate Credits
-        for zone in submission.ecosystems:
-            credits = 0.0
-            
-            if zone.type == 'grassland':
-                # Handle optional livestock if missing
-                if 'livestock_density' not in zone.specs: zone.specs['livestock_density'] = 0.0
-                credits = _calculate_grassland_credits(zone.specs)
-                
-            elif zone.type == 'wetland':
-                credits = _calculate_wetland_credits(zone.specs)
-                
-            elif zone.type == 'forest':
-                credits = _calculate_forest_credits(zone.specs)
-            
-            total_credits += credits
-            details.append({"type": zone.type, "generated_credits": credits})
-
-        final_credits = round(total_credits, 2)
-
-        # 2. Save to DB (Passing the 'submission' object directly as your DB expects)
-        save_project(submission, final_credits)
-
-        # 3. Return Success
-        return {
-            "status": "Verified",
-            "project_name": submission.project_name,
-            "total_credits": final_credits,
-            "breakdown": details,
-            "value_estimate": round(final_credits * 15, 2)
-        }
-
-    except Exception as e:
-        print(f"Error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+    # 2. RUN AI ANALYSIS
+    # (This replaces the random inputs we used before)
+    health_score = analyze_vegetation_health(contents)
+    
+    # 3. CALCULATE CREDITS based on AI finding
+    # We assume a standard 50 Hectare plot for the scan prototype
+    area_hectares = 50 
+    base_rate = 3.5 # Grassland
+    
+    total_credits = area_hectares * base_rate * health_score
+    value = total_credits * 15
+    
+    # 4. SAVE TO DB (Simplified for the scan)
+    # Note: You might want to expand database.py to handle images later
+    
+    return {
+        "status": "Scanned",
+        "file_name": file.filename,
+        "ai_health_index": health_score,
+        "total_credits": round(total_credits, 2),
+        "value_estimate": round(value, 2)
+    }
