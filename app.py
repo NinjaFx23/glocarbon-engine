@@ -2,31 +2,26 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 
-# --- IMPORTS FROM YOUR FILES ---
-# We use ProjectRequest because that is what your models.py uses!
+# --- IMPORTS (Matched to your files) ---
 from models import ProjectRequest, GrasslandSpecs, WetlandSpecs, ForestSpecs
-from database import add_project, get_all_projects
+from database import save_project, get_marketplace_listings, init_db
 
 # 1. INITIALIZE THE APP
 app = FastAPI(title="GloCarbon Engine API", version="1.0.0")
 
-# 2. ADD THE PERMISSION SLIP (CORS)
-# This allows your mobile app to talk to this server
+# 2. PERMISSION SLIP (CORS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows ALL origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- MATH LOGIC (Internal Helpers) ---
+# --- MATH LOGIC ---
 
 def _calculate_grassland_credits(raw_specs):
-    # Convert the dictionary (raw_specs) into the Pydantic model
     specs = GrasslandSpecs(**raw_specs) 
-    
-    # Logic: Cows reduce credits (methane), Health increases them
     methane_penalty = specs.livestock_density * 0.5
     base_rate = 3.5
     gross = specs.area_hectares * base_rate * specs.health_index
@@ -35,13 +30,11 @@ def _calculate_grassland_credits(raw_specs):
 
 def _calculate_wetland_credits(raw_specs):
     specs = WetlandSpecs(**raw_specs)
-    # Logic: Wetlands generate high credits (8.0 base)
     base_rate = 8.0
     return round(specs.area_hectares * base_rate, 2)
 
 def _calculate_forest_credits(raw_specs):
     specs = ForestSpecs(**raw_specs)
-    # Logic: Tree density matters
     biomass_per_tree = 0.02
     return round(specs.area_hectares * specs.tree_density * biomass_per_tree, 2)
 
@@ -49,6 +42,8 @@ def _calculate_forest_credits(raw_specs):
 
 @app.on_event("startup")
 def startup_event():
+    """Initialize the database when the server starts"""
+    init_db()
     print("🚀 GloCarbon API is listening...")
 
 @app.get("/")
@@ -57,25 +52,33 @@ def home():
 
 @app.get("/market")
 def view_market():
-    listings = get_all_projects()
-    return {"count": len(listings), "projects": listings}
+    # Get raw rows (tuples) from database
+    rows = get_marketplace_listings()
+    
+    # Convert tuples to JSON dictionary
+    results = []
+    for item in rows:
+        results.append({
+            "id": item[0],
+            "project_name": item[1],
+            "type": item[2],
+            "credits": item[3],
+            "status": item[4]
+        })
+    return {"count": len(results), "projects": results}
 
 @app.post("/verify_project")
 def submit_project(submission: ProjectRequest):
-    """
-    Accepts ProjectRequest (from your models.py), validates it, calculates credits.
-    """
     print(f"📥 Received project: {submission.project_name}")
     
     total_credits = 0.0
     details = []
 
     try:
-        # Analyze each zone
+        # 1. Calculate Credits
         for zone in submission.ecosystems:
             credits = 0.0
             
-            # Select the right math formula based on type
             if zone.type == 'grassland':
                 # Handle optional livestock if missing
                 if 'livestock_density' not in zone.specs: zone.specs['livestock_density'] = 0.0
@@ -90,21 +93,18 @@ def submit_project(submission: ProjectRequest):
             total_credits += credits
             details.append({"type": zone.type, "generated_credits": credits})
 
-        # Prepare data for Database
-        project_data = submission.model_dump()
-        project_data["total_credits"] = round(total_credits, 2)
-        project_data["breakdown"] = details
-        project_data["status"] = "Verified"
+        final_credits = round(total_credits, 2)
 
-        # Save to DB
-        add_project(project_data)
+        # 2. Save to DB (Passing the 'submission' object directly as your DB expects)
+        save_project(submission, final_credits)
 
+        # 3. Return Success
         return {
             "status": "Verified",
             "project_name": submission.project_name,
-            "total_credits": round(total_credits, 2),
+            "total_credits": final_credits,
             "breakdown": details,
-            "value_estimate": round(total_credits * 15, 2)
+            "value_estimate": round(final_credits * 15, 2)
         }
 
     except Exception as e:
